@@ -1,5 +1,4 @@
 import gymnasium as gym
-# import gym
 import panda_gym
 import numpy as np
 import imageio
@@ -10,10 +9,13 @@ from vecenv_actor import ActorNeuralNetwork
 
 
 lr = 1e-4
+# Define environment ids
 # env_id = 'PandaReach-v3'
 env_id = 'PandaPickAndPlace-v3'
 # env_id = 'PandaPush-v3'
-# env_id = 'PandaPush-v2'
+
+
+# --------------------------------------- STAFF NEEDED TO LOAD Actor Neural Network --------------------------------------------------------
 state_shape = 0
 env = gym.make(env_id, render=True)
 env.metadata['render_fps'] = 29
@@ -24,35 +26,24 @@ if (isinstance(env.observation_space, gym.spaces.Dict)):
 else:
     state_shape = env.observation_space.shape[-1]
 nn_dims = [256,256,256]
-# folder = 'tmp/networks/'
-folder = 'tmp/checkpoints/'
-file_name = '_Actor.pth'
-# file_name = '1.0_DDPG_Iter_1_Actor.pth'
-# folder = 'tmp/best_models/'
-# file_name = 'DDPG_Iter_4_Actor.pth'
+folder = 'tmp/networks/'
+file_name = '1.0_DDPG_Iter_1_Actor.pth'
 
 has_bias = True
+# --------------------------------------- STAFF NEEDED TO LOAD Actor Neural Network --------------------------------------------------------
 global_actor = ActorNeuralNetwork(env=env, input_dims=state_shape, n_actions=env.action_space.shape[-1], lr=lr, nn_dims=nn_dims, name="Actor", 
                                   chkpt_dir=folder, add_bias=has_bias)
 
-if has_bias:
-    global_actor.load_model(path=folder, file_name=file_name)
-    for layer in global_actor.children():
-        if isinstance(layer, nn.Linear):
-            print(f"Layer Weights: {layer.state_dict()['weight']}")
-            print(f"Layer {layer} Biases: {layer.state_dict()['bias']}")
-        
 num_episodes = 10
-'''Panda Gym Environment'''
 env.metadata['render_fps'] = 15
 save_gif = False
 
 if save_gif:
     '''Save simulation as GIF'''
     images = []
-    obs, info = env.reset()
+    obs, info = env.reset()    
     while np.linalg.norm(obs['achieved_goal'] - obs['desired_goal'], axis=-1) <= 0.05:
-            obs, info = env.reset()
+        obs, info = env.reset()        
     img = env.render(mode="rgb_array")
     for i in range(350):
         images.append(img)
@@ -67,7 +58,6 @@ if save_gif:
 
     env.close()
     date_now = time.strftime("%Y%m%d%H%M")
-    # imageio.mimsave("tmp/GIF/" + date_now + "_" + env_id + ".gif", [np.array(img) for i, img in enumerate(images) if i%2 == 0], fps=20)
     imageio.mimsave("tmp/GIF/" + date_now + "_" + env_id + ".gif", [np.array(img) for i, img in enumerate(images)], fps=15)
 else:
     '''Render Simulation'''
@@ -87,6 +77,5 @@ else:
             acc_reward += reward
             done = terminated | truncated
         
-        '''Panda Gym Environment'''
-        print("Episode {:4d} out of {:d} -> Reward: {:.4f}.\tInfo: {}\tZ desired: {}".format(episode+1, num_episodes, acc_reward, info, state['desired_goal'][2]))
+        print("Episode {:4d} out of {:d} -> Reward: {:.4f}.\tInfo: {}".format(episode+1, num_episodes, acc_reward, info))
     env.close()
