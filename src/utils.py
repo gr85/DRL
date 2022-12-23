@@ -4,6 +4,10 @@ import torch
 
 
 def StateVecToList(observations):
+    '''
+    Used for GoalEnv type environments where they have in the observation the tags: achieved_goal, observation, desired goal
+    Converts observation dictionary to a list
+    '''
     ach_list, obs_list, des_list = [], [], []
     for k,v in observations.items():
         if k=='achieved_goal':
