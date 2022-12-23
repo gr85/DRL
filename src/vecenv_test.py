@@ -22,14 +22,39 @@ from vecenv_critic import CriticNeuralNetwork
 from utils import StateVecToList
 
 import gymnasium as gym
-# import gym
 import panda_gym
 
 
-class TD3_RandProp(object):
+class TD3(object):
     def __init__(self, env, buffer, noise:str="OUNoise", theta:float=0.15, sigma:float=0.2, dt:float=0.1, folder:str='tmp/networks',
-                 gamma:float=0.99, mem_size:int=int(1e6), burn_in_tsteps:int=int(25e3), batch_size:int=100, lr:float=0.001, polyak:float=0.99, upd_freq:int=2,
+                 gamma:float=0.99, burn_in_tsteps:int=int(25e3), batch_size:int=100, lr:float=0.001, polyak:float=0.99, upd_freq:int=2,
                  random_prop:float=0.3, nn_dims:List=[256,256,256], env_id='PandaPickAndPlace-v3', n_envs:int=1, iteration:int=0, epsilon:float=1., bias:bool=True):
+	"""
+	TD3
+	===
+	TD3 agent with all functionalities to be trained and save the progress
+	
+	:param env: Vectorized environment to be used
+	:param buffer: replay buffer to be used
+	:param noise: which type of noise to apply to actions (Normal, OUNoise)
+	:param theta: for OUNoise scale for the previous sample
+	:param sigma: for noise standard deviation for normal distribution
+	:param dt: for OUNoise delta time
+	:param folder: folder to save the networks when finished
+	:param gamma: discount factor when calculate future rewards
+	:param burn_in_tsteps: number of timesteps to perform before start the train, to fill the replay buffer with some samples
+	:param batch_size: number of samples to retrieve from the replay buffer when updating the networks
+	:param lr: learning rate to define the optimizers for neural networks
+	:param polyak: the factor to apply for the soft update of the target networks [0=copy exactly the main to target networks] (inverse of tau)
+	:param upd_freq: interval in timesteps where the actor and target networks need to be updated
+	:param random_prop: probability to select a random action during the training
+	:param nn_dims: dimensions of the 3 layer of the neural networks
+	:param env_id: name of the environment
+	:param n_envs: number of environments in the Vectorized environment
+	:param iteration: used to save the progress when running multiple trainings, in order to save the results separately
+	:param epsilon: value used if the epsilon-greedy strategy wants to be used (epsilon<=rand_prop => No epsilon-greedy)
+	:param bias: whether to add bias or not to the layers of the neural networks (just for testing)
+	"""
         self.folder = folder
         self.gamma = gamma
         self.env = env
@@ -295,23 +320,17 @@ class TD3_RandProp(object):
         # Get current Q estimates
         current_Q1, current_Q2 = self.critic_1.forward(states, actions), self.critic_2.forward(states, actions)
         # Compute critic loss
-        # critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
         critic_loss_1 = F.mse_loss(current_Q1, target_Q)
         critic_loss_2 = F.mse_loss(current_Q2, target_Q)
-        # crtici_loss = min(critic_loss_1, critic_loss_2)
         
-		# Optimize the critic 1
+	# Optimize the critic 1
         self.critic_1.optimizer.zero_grad()
         critic_loss_1.backward()
         self.critic_1.optimizer.step()
         
         # Optimize the critic 2
-        # self.critic_1.optimizer.zero_grad()
         self.critic_2.optimizer.zero_grad()
-        # crtici_loss.backward()
-        # critic_loss_1.backward()
         critic_loss_2.backward()
-        # self.critic_1.optimizer.step()
         self.critic_2.optimizer.step()
         
         if (timesteps % self.update_freq) == 0:
@@ -497,69 +516,40 @@ class TD3_RandProp(object):
     def load_results(self, file):
         with open(file) as rf:
             dict_res = json.load(rf)
-        return dict_res
-    
-    def plot_results(self, file='tmp/train_res/td3_train_vals.json'):
-        data = self.load_results(file)
-        
-        # Grafico la posició final, l'evolució mitjana de les pèrdues i l'evolució d'epsilon
-        fig = plt.figure()
-        gs = gridspec.GridSpec(2, 1)
-
-        ax1 = plt.subplot(gs[0,:])
-        ax1.plot([float(d) for d in data['mean_loss']], label='Mean Actor Loss', color=(0., 0., 1., 1.))
-        ax1.plot([float(d) for d in data['mean_critic_loss']], label='Mean Critic Loss', color=(1., 0., 0., 0.6))        
-        ax1.set_title('Mean Loss per Episode')
-        ax1.set_xlabel('Time steps')
-        ax1.set_ylabel('Loss')
-        # ax1.set_xscale('log')
-        ax1.legend(loc="upper left")
-
-        ax2 = plt.subplot(gs[1,:])
-        ax2.plot([float(d) for d in data['train_reward']], label='Rewards', color=(0., 0., 1., 0.3))
-        ax2.plot([float(d) for d in data['mean_train_reward']], label='Mean Rewards', color=(0., 0., 1., 1.))
-        ax2.set_title('Rewards per Episode')
-        ax2.set_xlabel('Episodes')
-        ax2.set_ylabel('Rewards')
-        # ax2.set_xscale('log')
-        ax2.legend(loc="upper left")
-        
-        fig.add_subplot(ax1)
-        fig.add_subplot(ax2)
-        
-        plt.show()
-        
-        plt.plot([float(d) for d in data['mean_loss']], label='Mean Actor Loss', color=(0., 0., 1., 1.))
-        plt.plot([float(d) for d in data['mean_critic_loss']], label='Mean Critic Loss', color=(1., 0., 0., 0.6))
-        plt.title('Mean Loss per Episode')
-        plt.xlabel('Time steps')
-        plt.ylabel('Loss')
-        plt.legend(loc="upper left")
-        # plt.xscale('log')
-        plt.show()
-
-        plt.plot([float(d) for d in data['train_reward']], label='Rewards', color=(0., 0., 1., 0.3))
-        plt.plot([float(d) for d in data['mean_train_reward']], label='Mean Rewards', color=(0., 0., 1., 1.))
-        plt.title('Rewards per Episode')
-        plt.xlabel('Episodes')
-        plt.ylabel('Rewards')
-        plt.legend(loc="upper left")
-        # plt.xscale('log')
-        plt.show()
-        
-        plt.plot([int(p) for p in data['success_rate_ts']], [float(d) for d in data['success_rate']], color=(0., 0., 1., 1.))
-        plt.title('Success Rate per Episode')
-        plt.xlabel(f'Time steps')
-        plt.ylabel('Success Rate')
-        # plt.xscale('log')
-        plt.show()
+        return dict_res   
 
 
-class DDPG_RandProp(object):
+class DDPG(object):
     def __init__(self, env, buffer, noise:str="OUNoise", theta:float=0.15, sigma:float=0.2, dt:float=0.1, folder:str='tmp_extended_ddpg/networks',
-                 gamma:float=0.99, mem_size:int=int(1e6), burn_in_tsteps:int=int(25e3), batch_size:int=100, lr:float=0.001, polyak:float=0.1, upd_freq:int=2,
+                 gamma:float=0.99, burn_in_tsteps:int=int(25e3), batch_size:int=100, lr:float=0.001, polyak:float=0.1, upd_freq:int=1,
                  random_prop:float=0.3, nn_dims:list[int]=[256,256,256], env_id='PandaPickAndPlace-v3', n_envs:int=1, iteration:int=0, epsilon:float=1., bias:bool=True):
-        self.folder = folder
+        """
+	DDPG
+	===
+	DDPG agent with all functionalities to be trained and save the progress
+	
+	:param env: Vectorized environment to be used
+	:param buffer: replay buffer to be used
+	:param noise: which type of noise to apply to actions (Normal, OUNoise)
+	:param theta: for OUNoise scale for the previous sample
+	:param sigma: for noise standard deviation for normal distribution
+	:param dt: for OUNoise delta time
+	:param folder: folder to save the networks when finished
+	:param gamma: discount factor when calculate future rewards
+	:param burn_in_tsteps: number of timesteps to perform before start the train, to fill the replay buffer with some samples
+	:param batch_size: number of samples to retrieve from the replay buffer when updating the networks
+	:param lr: learning rate to define the optimizers for neural networks
+	:param polyak: the factor to apply for the soft update of the target networks [0=copy exactly the main to target networks] (inverse of tau)
+	:param upd_freq: interval in timesteps where the actor and target networks need to be updated
+	:param random_prop: probability to select a random action during the training
+	:param nn_dims: dimensions of the 3 layer of the neural networks
+	:param env_id: name of the environment
+	:param n_envs: number of environments in the Vectorized environment
+	:param iteration: used to save the progress when running multiple trainings, in order to save the results separately
+	:param epsilon: value used if the epsilon-greedy strategy wants to be used (epsilon<=rand_prop => No epsilon-greedy)
+	:param bias: whether to add bias or not to the layers of the neural networks (just for testing)
+	"""
+	self.folder = folder
         self.gamma = gamma
         self.env = env
         self.update_freq = upd_freq
@@ -971,62 +961,8 @@ class DDPG_RandProp(object):
     def load_results(self, file):
         with open(file) as rf:
             dict_res = json.load(rf)
-        return dict_res
+        return dict_res   
     
-    def plot_results(self, file='tmp_extended_ddpg/train_res/ddpg_train_vals.json'):
-        data = self.load_results(file)
-        
-        # Grafico la posició final, l'evolució mitjana de les pèrdues i l'evolució d'epsilon
-        fig = plt.figure()
-        gs = gridspec.GridSpec(2, 1)
-
-        ax1 = plt.subplot(gs[0,:])
-        ax1.plot([float(d) for d in data['mean_loss']], label='Mean Actor Loss', color=(0., 0., 1., 1.))
-        ax1.plot([float(d) for d in data['mean_critic_loss']], label='Mean Critic Loss', color=(1., 0., 0., 0.6))        
-        ax1.set_title('Mean Loss per Episode')
-        ax1.set_xlabel('Time steps')
-        ax1.set_ylabel('Loss')
-        # ax1.set_xscale('log')
-        ax1.legend(loc="upper left")
-
-        ax2 = plt.subplot(gs[1,:])
-        ax2.plot([float(d) for d in data['train_reward']], label='Rewards', color=(0., 0., 1., 0.3))
-        ax2.plot([float(d) for d in data['mean_train_reward']], label='Mean Rewards', color=(0., 0., 1., 1.))
-        ax2.set_title('Rewards per Episode')
-        ax2.set_xlabel('Episodes')
-        ax2.set_ylabel('Rewards')
-        # ax2.set_xscale('log')
-        ax2.legend(loc="upper left")
-        
-        fig.add_subplot(ax1)
-        fig.add_subplot(ax2)
-        
-        plt.show()
-        
-        plt.plot([float(d) for d in data['mean_loss']], label='Mean Actor Loss', color=(0., 0., 1., 1.))
-        plt.plot([float(d) for d in data['mean_critic_loss']], label='Mean Critic Loss', color=(1., 0., 0., 0.6))
-        plt.title('Mean Loss per Episode')
-        plt.xlabel('Time steps')
-        plt.ylabel('Loss')
-        plt.legend(loc="upper left")
-        # plt.xscale('log')
-        plt.show()
-
-        plt.plot([float(d) for d in data['train_reward']], label='Rewards', color=(0., 0., 1., 0.3))
-        plt.plot([float(d) for d in data['mean_train_reward']], label='Mean Rewards', color=(0., 0., 1., 1.))
-        plt.title('Rewards per Episode')
-        plt.xlabel('Episodes')
-        plt.ylabel('Rewards')
-        plt.legend(loc="upper left")
-        # plt.xscale('log')
-        plt.show()
-        
-        plt.plot([int(p) for p in data['success_rate_ts']], [float(d) for d in data['success_rate']], color=(0., 0., 1., 1.))
-        plt.title('Success Rate per Episode')
-        plt.xlabel(f'Time steps')
-        plt.ylabel('Success Rate')
-        # plt.xscale('log')
-        plt.show()
 
 
 
@@ -1053,8 +989,8 @@ if __name__ == '__main__':
     mem_size = int(1e6) 
     burn_in_tsteps = int(1e5)
     
-    for i in range(7):
-        if i<2:
+    for i in range(10):
+        if i<5:
             agent_type = "DDPG"
         else:
             agent_type = "TD3"
@@ -1066,15 +1002,15 @@ if __name__ == '__main__':
                                      env=envs, device=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'), n_envs=n_envs,
                                      optimize_memory_usage=False, handle_timeout_termination=False, n_sampled_goal=4, goal_selection_strategy="future",
                                      online_sampling=True, env_id=env_id)            
-        else:
-            buffer = experienceReplayBuffer(envs, memory_size=mem_size, burn_in=burn_in_tsteps) # buffer de repeticions
+#         else:
+#             buffer = experienceReplayBuffer(envs, memory_size=mem_size, burn_in=burn_in_tsteps) # buffer de repeticions
                  
         if agent_type.upper() == "DDPG":
-            agent = DDPG_RandProp(envs, buffer, noise="Normal", theta=0.15, sigma=0.2, dt=0.1, folder=s_folder, gamma=0.99, mem_size=mem_size,
+            agent = DDPG(envs, buffer, noise="Normal", theta=0.15, sigma=0.2, dt=0.1, folder=s_folder, gamma=0.99,
                                 burn_in_tsteps=burn_in_tsteps, batch_size=256, lr=lr, polyak=0.95, upd_freq=1, random_prop=0.3, nn_dims=nn_dims,
                                 env_id=env_id, n_envs=n_envs, iteration=i+2, epsilon=0.3, bias=True)
         elif agent_type.upper() == "TD3":
-            agent = TD3_RandProp(envs, buffer, noise="Normal", theta=0.15, sigma=0.2, dt=0.1, folder=s_folder, gamma=0.99, mem_size=mem_size,
+            agent = TD3(envs, buffer, noise="Normal", theta=0.15, sigma=0.2, dt=0.1, folder=s_folder, gamma=0.99,
                                 burn_in_tsteps=burn_in_tsteps, batch_size=256, lr=lr, polyak=0.95, upd_freq=2, random_prop=0.3, nn_dims=nn_dims,
                                 env_id=env_id, n_envs=n_envs, iteration=abs(i-3), epsilon=0.3, bias=True)
     
