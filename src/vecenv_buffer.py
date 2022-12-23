@@ -10,22 +10,19 @@ import gymnasium as gym
 import torch
 
 
-class experienceReplayBuffer():
-    '''
+class experienceReplayBuffer():        
+    def __init__(self, envs, memory_size=50000, burn_in=10000):
+        '''
         Experience Replay Buffer
         ========================
     
         Used to store some experiencies to be used in the update of the networks to assure the i.i.d. (independently and identically distributed) samples
         
-        Initialization of the buffer
-
+        :param envs: Vectorized environment
         :param memory_size: maximum capacity of the buffer. When it is reached the oldest samples are deleted and replaced for new ones
         :param burn_in: number of samples to consider the buffer is initialized with the required amount of samples        
         :return: returns nothing
         '''
-        
-    def __init__(self, envs, memory_size=50000, burn_in=10000):
-        
         self.burn_in = burn_in
         self.envs = envs
         
@@ -34,8 +31,7 @@ class experienceReplayBuffer():
         state_shape = 0
         if (isinstance(envs.single_observation_space, gym.spaces.Dict)):
             for key, _obs_shape in envs.single_observation_space.items():
-                if key == 'observation' or key == 'desired_goal':
-                    state_shape = state_shape + _obs_shape.shape[-1]
+                state_shape = state_shape + _obs_shape.shape[-1]
         else:
             state_shape = envs.single_observation_space.shape[-1]
         self.state_memory = np.zeros((self.mem_size, state_shape), dtype=float)
@@ -190,16 +186,35 @@ KEY_TO_GOAL_STRATEGY = {
 
 class HERBuffer():
     """
-    Hindsight Exprience Replay (HER) Buffer: https://arxiv.org/abs/1707.01495
-    The HER buffer uses the same trick as the standard `ReplayBuffer` using
-    a single array to handle the observations. Instead of sampling and storing
-    goals every time we add transitions, instead we do it all at once when
-    sampling for vectorized (fast) processing.
-    :param env: the environment
-    :param buffer_size: max number of elements in the buffer
-    :param goal_selection_strategy: the goal selection strategy to be used, defaults to future
-    :param n_sampled_goal: ratio of HER data to data coming from normal experience replay
-    :param device: if return torch tensors on sampling, the device to attach to
+    ----- Code taken from: 
+            https://github.com/qgallouedec/stable-baselines3/blob/684364beddc53d206db38770db222aad1c599282/stable_baselines3/her/her_replay_buffer.py
+        and adapted to work with gymnasium package
+    ----- 
+    Hindsight Experience Replay (HER) buffer.
+    Paper: https://arxiv.org/abs/1707.01495
+    .. warning::
+      For backward compatibility, we implement offline sampling. The offline
+      sampling mode only works for `n_envs == 1`.
+    Replay buffer for sampling HER (Hindsight Experience Replay) transitions.
+    In the online sampling case, these new transitions will not be saved in the replay buffer
+    and will only be created at sampling time.
+    :param buffer_size: Max number of element in the buffer
+    :param observation_space: Observation space
+    :param action_space: Action space
+    :param env: The training environment
+    :param device: PyTorch device
+    :param n_envs: Number of parallel environments
+    :param optimize_memory_usage: Enable a memory efficient variant
+        Disabled for now (see https://github.com/DLR-RM/stable-baselines3/pull/243#discussion_r531535702)
+    :param handle_timeout_termination: Handle timeout termination (due to timelimit)
+        separately and treat the task as infinite horizon task.
+        https://github.com/DLR-RM/stable-baselines3/issues/284
+    :param n_sampled_goal: Number of virtual transitions to create per real transition,
+        by sampling new goals.
+    :param goal_selection_strategy: Strategy for sampling goals for replay.
+        One of ['episode', 'final', 'future']
+    :param online_sampling: If False, virtual transitions are saved in the replay buffer.
+        Only works for `n_envs == 1`.
     """
 
     def __init__(self, env, memory_size: int, goal_selection_strategy: Union[GoalSelectionStrategy, str] = "future", n_sampled_goal: int = 4,
