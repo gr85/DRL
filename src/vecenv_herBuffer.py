@@ -7,8 +7,6 @@ import numpy as np
 import torch as th
 import gymnasium as gym
 from gymnasium import spaces
-# import gym
-# from gym import spaces
 
 from stable_baselines3.common.buffers import DictReplayBuffer
 from stable_baselines3.common.type_aliases import DictReplayBufferSamples, TensorDict
@@ -18,6 +16,10 @@ from stable_baselines3.her.goal_selection_strategy import KEY_TO_GOAL_STRATEGY, 
 
 class HerReplayBuffer(DictReplayBuffer):
     """
+    ----- Code took from: 
+            https://github.com/qgallouedec/stable-baselines3/blob/684364beddc53d206db38770db222aad1c599282/stable_baselines3/her/her_replay_buffer.py
+        and adapted to work with gymnasium package
+    ----- 
     Hindsight Experience Replay (HER) buffer.
     Paper: https://arxiv.org/abs/1707.01495
     .. warning::
@@ -171,67 +173,7 @@ class HerReplayBuffer(DictReplayBuffer):
                 # Update the current episode start
                 self._current_ep_start[env_idx] = self.pos
                 if not self.online_sampling and not is_virtual:
-                    self._sample_offline(env_idx)
-                    
-                    
-    def save_checkpoint(self, folder = 'tmp_extended/checkpoints'):        
-        with open(folder + '/ep_start.json', 'w') as wf:            
-            json.dump({"ep_start": self.ep_start.tolist()}, wf)
-        with open(folder + '/ep_length.json', 'w') as wf:
-            json.dump({"ep_length": self.ep_length.tolist()}, wf)
-        with open(folder + '/pos.json', 'w') as wf:
-            json.dump({"pos": self.pos}, wf)
-        with open(folder + '/_current_ep_start.json', 'w') as wf:
-            json.dump({"_current_ep_start": self._current_ep_start.tolist()}, wf)
-        json_string = json.dumps(self.observations, cls=NumpyEncoder)
-        with open(folder + '/observations.json', 'w') as wf:
-            json.dumps({"observations": json_string})
-        json_string = json.dumps(self.next_observations, cls=NumpyEncoder)
-        with open(folder + '/next_observations.json', 'w') as wf:
-            # json.dump({"next_observations": self.next_observations}, wf)
-            json.dumps({"next_observations": json_string})
-        with open(folder + '/actions.json', 'w') as wf:
-            json.dump({"actions": self.actions.tolist()}, wf)            
-        with open(folder + '/dones.json', 'w') as wf:
-            json.dump({"dones": self.dones.tolist()}, wf)            
-        with open(folder + '/timeouts.json', 'w') as wf:
-            json.dump({"timeouts": self.timeouts.tolist()}, wf)
-        with open(folder + '/rewards.json', 'w') as wf:
-            json.dump({"rewards": self.rewards.tolist()}, wf)
-    
-    def load_checkpoint(self, folder='tmp_extended'):
-        with open(folder + '/checkpoints/ep_start.json') as rf:
-            dict_res = json.load(rf)
-            self.ep_start = np.array(dict_res['ep_start'])
-        with open(folder + '/checkpoints/ep_length.json') as rf:
-            dict_res = json.load(rf)
-            self.ep_length = np.array(dict_res['ep_length'])
-        with open(folder + '/checkpoints/pos.json') as rf:
-            dict_res = json.load(rf)
-            self.pos = int(dict_res['pos'])
-        with open(folder + '/checkpoints/_current_ep_start.json') as rf:
-            dict_res = json.load(rf)
-            self._current_ep_start = np.array(dict_res['_current_ep_start'])
-        with open(folder + '/checkpoints/observations.json') as rf:
-            dict_res = json.load(rf)
-            self.observations = dict_res['observations']
-        with open(folder + '/checkpoints/next_observations.json') as rf:
-            dict_res = json.load(rf)
-            self.next_observations = dict_res['next_observations']
-        with open(folder + '/checkpoints/actions.json') as rf:
-            dict_res = json.load(rf)
-            self.actions = np.array(dict_res['actions'])            
-        with open(folder + '/checkpoints/dones.json') as rf:
-            dict_res = json.load(rf)
-            self.dones = np.array(dict_res['dones'])            
-        with open(folder + '/checkpoints/timeouts.json') as rf:
-            dict_res = json.load(rf)
-            self.timeouts = int(dict_res['timeouts'])
-        with open(folder + '/checkpoints/rewards.json') as rf:
-            dict_res = json.load(rf)
-            self.rewards = int(dict_res['rewards'])
-
-
+                    self._sample_offline(env_idx)    
 
     def sample(self, batch_size: int, env: Optional[VecNormalize] = None) -> DictReplayBufferSamples:
         if self.online_sampling:
