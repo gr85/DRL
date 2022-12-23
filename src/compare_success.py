@@ -117,26 +117,7 @@ def compare_success(env_id:str):
             dict_res_td3_1 = json.load(rf)
             
         # ---------------------------------------------------------   LOAD FILES   -------------------------------------------------------------------------------------------------
-
-        # ---------------------------------------------------------   PREPARE DATA -------------------------------------------------------------------------------------------------
-
-        x_points = [float(p) for p in dict_res_ddpg_1['success_rate_ts'] if p <= int(1.15e6)]
-        x_points_2 = [float(p) for p in dict_res_ddpg_5['success_rate_ts'] if p <= int(1.15e6)]
-        lists = []
-        lists.append(list(np.array(dict_res_ddpg_1['success_rate'][:min(len(x_points),len(x_points_2))], dtype=float)))
-        # lists.append(list(np.array(dict_res_ddpg_2['success_rate'][:len(x_points)], dtype=float)))
-        # lists.append(list(np.array(dict_res_ddpg_3['success_rate'][:min(len(x_points),len(x_points_2))], dtype=float)))
-        # lists.append(list(np.array(dict_res_ddpg_4['success_rate'][:len(x_points)], dtype=float)))
-        lists.append(list(np.array(dict_res_ddpg_5['success_rate'][:min(len(x_points),len(x_points_2))], dtype=float)))
-        lists.append(list(np.array(dict_res_ddpg_6['success_rate'][:min(len(x_points),len(x_points_2))], dtype=float)))
-
-        X1 = np.array([x for x in itertools.zip_longest(*lists, fillvalue=0)], dtype=float)
-        mu1 = np.mean(X1, axis=1)
-        median = np.median(X1, axis=1)
-        sigma1 = np.std(X1, axis=1)
-
-        # ---------------------------------------------------------   PREPARE DATA -------------------------------------------------------------------------------------------------
-
+        
         # ---------------------------------------------------------   PLOT DATA    -------------------------------------------------------------------------------------------------
 
         '''PLOT success rates'''    
@@ -145,14 +126,7 @@ def compare_success(env_id:str):
         value1 = [float(d) for d in dict_res_ddpg_1['success_rate'][:len(x_points)]]
         plt.plot(x_points, value1, 
                 label='DDPG - sigma=0.2, gamma=0.98, polyak=0.95, HER, random_prop=0.3, nn_dims=[256,256,256], init_bias=uniform(-2, 2), Batch Normalization = LayerNorm. Iter 1', 
-                color=(0.4, 0.4, 0.4, 1.))
-        # plt.plot(x_points if len(x_points) < len(x_points_2) else x_points_2, median, 
-        #         label='DDPG - median +-1std', 
-        #         color=(0., 0., 1., 1.))
-        # plt.fill_between(x_points if len(x_points) < len(x_points_2) else x_points_2, (mu1+sigma1).clip(0., 1.), (mu1-sigma1).clip(0., 1.), color=(0., 0., 1., 0.3))#,
-        #                 # label='Mean +/- 1 STD') #facecolor='blue', alpha=0.5)
-                        
-                        
+                color=(0.4, 0.4, 0.4, 1.))                  
         # value2 = [float(d) for d in dict_res_ddpg_3['success_rate'][:len(x_points)]]
         # plt.plot([float(p) for p in dict_res_ddpg_3['success_rate_ts'][:len(x_points)]], value2, 
         #         label='DDPG - sigma=0.2, gamma=0.98, polyak=0.95, HER, random_prop=0.3, nn_dims=[256,256,256], init_bias=uniform(-4, 4), Batch Normalization = LayerNorm. Iter 2', 
@@ -191,9 +165,6 @@ def compare_success(env_id:str):
         
         
         plt.axhline(y=1.0, color=(0.,0.,0.,1.), linestyle='--')
-        # plt.axhline(y=max(median), color=(0.,0.,1.,1.), linestyle=':')
-        # plt.axhline(y=max(value_no_bias), color=(1.,0.,0.,1.), linestyle=':')
-        # plt.axvline(x=int(1.5e6), color=(0.,0.,0.,1.), linestyle=':')
         plt.title('PickAndPlace - Success Rate per Time step')
         plt.xlabel(f'Time steps')
         plt.ylabel('Success Rate')
