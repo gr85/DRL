@@ -8,14 +8,19 @@ class NoiseBase(object):
     def reset(self):
         pass
 
-class OUNoise(NoiseBase):
-    '''
-    Ornstein-Uhlenbeck noise 
-    ========================
-    Noise to be added with the action took by the agent
-    in order to force the exploration of the action space
-    '''
+class OUNoise(NoiseBase):    
     def __init__(self, theta:float=0.15, mu:np.array=np.zeros(shape=1, dtype=float), sigma:float=0.2, dt:float=1e-1, x0=None):
+        '''
+        Ornstein-Uhlenbeck noise 
+        ========================
+        Noise to be added with the action took by the agent
+        in order to force the exploration of the action space
+        :param theta: scale for the previous sample
+        :param mu: mean for normal distribution
+        :param sigma: standard deviation for normal distribution
+        :param dt: delta time
+        :param x0: initial sample
+        '''
         super(OUNoise, self).__init__()
         self.theta = theta
         self.mu = mu
@@ -39,6 +44,17 @@ class OUNoise(NoiseBase):
 
 class NormalNoise(object):
     def __init__(self, sigma:float=0.2, size:int=4, mu:float=0.0, n_envs:int=1):
+        '''
+        Normal noise 
+        ========================
+        Noise to be added with the action took by the agent
+        in order to force the exploration of the action space
+        :param theta: not used
+        :param mu: not used
+        :param sigma: standard deviation
+        :param dt: not used
+        :param x0: not used
+        '''
         super(NormalNoise, self).__init__()
         self.sigma = sigma
         self.mu = mu
