@@ -10,11 +10,11 @@ The code which we developped used a HER buffer and a vectorized environments, fo
 The environments used must be the type of GoalEnv to work, because of the use of HER which is a mandatory condition.
 
 ## Using
-The main file to run is _src/vecenv_test.py_. It is where the model and the training behvaiour are defined.
+The main file to run is _src/vecenv_test.py_. It is where the model and the training behaviour are defined.
 
 Before starting the code be sure that you have the same folder structure as this repository (_tmp_ and childs)
 
-This project uses the _gymnasium_ package instead of _gym_, if you want to run the gymnasium package some changes in the _stable-baselines3_ package must be done in order to work properly with the HER buffer, because in the moment of writing it only supports gym package (the main changes are in the import, where you must change _gym_ for _gymnasium_). If you want to use _gym_ look inside my code and comment the parts where the note '''Panda-Gym V3''' is present and uncomment the lines with '''Panda-Gym V2''', then be sure you have installed _panda-gym==2.0.3_, because it is the verion which is using _gym_ yet.
+This project uses the _gymnasium_ package instead of _gym_, if you want to run the gymnasium package some changes in the _stable-baselines3_ package must be done in order to work properly with the HER buffer, because in the moment of writing it only supports gym package (the main changes are in the import, where you must change _gym_ for _gymnasium_). If you want to use _gym_ look inside the code provided here and comment the parts where the note '''Panda-Gym V3''' is present and uncomment the lines with '''Panda-Gym V2''', then be sure you have installed _panda-gym==2.0.3_, because it is the verion which is using _gym_ yet.
 
 
 ## Citation
