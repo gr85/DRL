@@ -1,5 +1,13 @@
 # DRL
-Deep Reinforcement Learning repository to test different algorithms
+The aim of this repository is to build different policy base algorithms (such as DDPG, TD3) of Deep Reinforcement Learning and test them in different environments.
+
+This is part of the Final Master's Degree Thesis of the Master in Data Science from UOC (_Universitat Oberta de Catalunya_). Where we wanted to apply the state-of-the-art algorithms to deal with continuous action spaces, specially focused on solving some industrial robotics task. The main goal of this project was to solve a simple Pick and Place task involving an industrial robot.
+
+To help the tests of these tasks we used a simulator based on PyBullet open source physics engine and designed by the team cited at the end.
+
+The code which we developped used a HER buffer and a vectorized environments, for this reason it only works with vectorized environments. The implementation of here were took from https://github.com/qgallouedec/stable-baselines3/blob/684364beddc53d206db38770db222aad1c599282/stable_baselines3/her/her_replay_buffer.py and adapted to work with gymnasium package.
+
+The environments used must be the type of GoalEnv to work, because of the use of HER which is a mandatory condition.
 
 ## Using
 The main file to run is _src/vecenv_test.py_. It is where the model and the training behvaiour are defined.
