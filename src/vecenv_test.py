@@ -65,11 +65,14 @@ class TD3(object):
         self.validate_timesteps = 0
         self.env_id = env_id
         self.ts_offset = 0
-        # In order to force exploration use epsilon-greedy approach
-        self.epsilon = epsilon
-        self.epsion_decay = 0.999
         self.best_succ_rate = 0.0
         self.iteration = iteration + 1
+	# Parameters to perform shaped clipping value
+	self.clip0 = 2.0
+        self.clip = self.clip0
+        self.clip_mul = 2.
+        self.clip_x0 = -9.
+        self.clip_inc = 0.00002
         
         '''Panda-Gym V3'''
         self.single_env = gym.make(self.env_id)
@@ -106,6 +109,7 @@ class TD3(object):
         self.mean_training_rewards = [] # Les recompenses mitjanes cada 100 episodis
         self.success_rate = [] # Average success rate on validaton model
         self.success_rate_ts = [] # Timestep which validation were performed
+	self.clip_evolution = [] # Gradient clipping value used in every update
         
         '''Neural Networks for Panda Gym Environments'''
         self.actor = ActorNeuralNetwork(env=self.single_env, input_dims=state_shape, n_actions=env.single_action_space.shape[-1], lr=lr, nn_dims=nn_dims, name="Actor", 
@@ -150,9 +154,12 @@ class TD3(object):
         
         _load_from_checkpoint = load_from_checkpoint
         
-        # Omplim el buffer amb N experiències aleatòries ()
-        # if not _load_from_checkpoint:
-        print("Filling replay buffer...")
+        if _load_from_checkpoint:
+            self.load_checkpoint(folder=self.folder)
+            max_tsteps = self.episodes
+            prev_tsteps = self.success_rate_ts[-1]
+        # Fill the buffer with N random experiences
+	print("Filling replay buffer...")
         '''Panda-Gym V3'''
         state, info = self.env.reset()
         '''Panda-Gym V2'''
@@ -165,7 +172,10 @@ class TD3(object):
         while timesteps < self.burn_in_tsteps:
             timesteps += 1
             
-            action = self.get_action(state, random=True)
+            if _load_from_checkpoint:
+                action = self.get_action(state, random=False)
+            else:
+                action = self.get_action(state, random=True)
             
             '''Panda-Gym V3'''
             next_state, reward, terminated, truncated, info = self.env.step(action)
@@ -174,6 +184,12 @@ class TD3(object):
             # next_state, reward, done, info = self.env.step(action)
             # any_success = np.array([i['is_success'] for i in info], dtype=bool)
             # done = done | any_success
+		
+	    # If we use OUNoise check if any environment has ended and reset the noise generation
+	    if self.noise_id == 'OUNoise':
+                for i in range(len(done)):
+                    if done[i]:
+                        self.noise.x_prev[i] = np.zeros_like(self.env.single_action_space.shape[-1])
            
             # self.buffer.append(state, action, reward, next_state, done)
             '''stable-baselines3'''
@@ -191,9 +207,7 @@ class TD3(object):
         '''Panda-Gym V3'''
         state, info = self.env.reset()
         '''Panda-Gym V2'''
-        # state = self.env.reset()
-        # while np.linalg.norm(state['achieved_goal'] - state['desired_goal'], axis=-1) < 0.07:
-        #     state, info = self.env.reset()
+        # state = self.env.reset()        
         self.noise.reset() 
         for timesteps in tqdm(range(max_tsteps)):           
             steps += 1
@@ -215,11 +229,12 @@ class TD3(object):
             '''Panda-Gym V3'''            
             next_state, reward, terminated, truncated, _ = self.env.step(action)
             done = terminated | truncated
-            
-            # Only update epsilon if the first environment has ended the episode
-            if done[0]:
-                # Actualitzar epsilon segons la velocitat de decaïment fixada
-                self.epsilon = max(self.epsilon * self.epsion_decay, self.random_prob)
+	    
+	    # If we use OUNoise check if any environment has ended and reset the noise generation
+	    if self.noise_id == 'OUNoise':
+                for i in range(len(done)):
+                    if done[i]:
+                        self.noise.x_prev[i] = np.zeros_like(self.env.single_action_space.shape[-1])
                 
             '''Validation done based on episodes completed'''
             # if any(done)==True:
@@ -238,6 +253,10 @@ class TD3(object):
                     self.actor.save_checkpoint(folder='tmp/best_models', filename_header='TD3_Iter_'+str(self.iteration))
                 self.success_rate.append(success_rate)
                 self.success_rate_ts.append(timesteps)
+		if load_from_checkpoint:
+                    self.success_rate_ts.append(timesteps+prev_tsteps)
+                else:
+                    self.success_rate_ts.append(timesteps)
                 print(f'\tSuccess Rate: {self.success_rate[-1]}')
             
             eps_rewards += reward
@@ -248,15 +267,14 @@ class TD3(object):
             self.update_networks(steps)
             state = next_state.copy()
             
-            # self.loss_evolution.append(np.mean(self.update_loss))
-            # self.critic_loss_evolution.append(np.mean(self.update_critic_loss))
-            # self.update_loss = []
-            # self.update_critic_loss = []
+            self.loss_evolution.append(np.mean(self.update_loss))
+            self.critic_loss_evolution.append(np.mean(self.update_critic_loss))
+            self.update_loss = []
+            self.update_critic_loss = []
                        
             if timesteps % tsteps_checkpoint == 0 and timesteps > 1:
                 self.episodes = max_tsteps - timesteps
                 self.save_checkpoint()
-                # print(f'Episode {episode} -> Success Rate: {self.success_rate[-1]*100.0} %')
         print('\t... Performing Final Validation of Model ...')
         if success_rate >= self.best_succ_rate:
             self.best_succ_rate = success_rate
@@ -265,40 +283,28 @@ class TD3(object):
         self.success_rate_ts.append(timesteps)
         print(f'\tSuccess Rate of Final Validation: {self.success_rate[-1]}')
                                 
-    def update_networks(self, timesteps, batch=None):
+    def update_networks(self, timesteps, batch=None, clip_grad=False):
         # state, action, reward, next_state, done = self.buffer.sample_batch(batch_size=self.batch_size)
         '''stable-baselines3'''
-        samples = buffer.sample(batch_size=self.batch_size, env=self.env)
-        # print(f'observations: {samples[0]["observation"].shape}')
-        # print(f'actions: {samples[1]}')
-        # print(f'next_observations: {samples[2]}')
-        # print(f'dones: {samples[3]}')
-        # print(f'rewards: {samples[4]}')
+        samples = buffer.sample(batch_size=self.batch_size, env=self.env)        
         state = samples[0]
         action = samples[1]
         next_state = samples[2]
         done = samples[3]      
         reward = samples[4]
         
-        # Separem les variables de l'experiència i les convertim a tensors
         if (isinstance(self.env.observation_space, gym.spaces.Dict)):
-            # states = state
-            # next_states = next_state
             states = StateVecToList(state)
             next_states = StateVecToList(next_state)
         else:
             states = np.array(state) #torch.tensor(np.array(state), dtype=torch.float).to(self.actor.device)
             next_states = np.array(next_state) #torch.tensor(np.array(next_state), dtype=torch.float).to(self.actor.device)
             
-        # actions = torch.tensor(np.array(action), dtype=torch.float).to(self.actor.device)
-        # rewards = torch.tensor(reward, dtype=torch.float).to(self.actor.device)
-        # dones = torch.tensor(done, dtype=torch.float).to(self.actor.device)
         '''stable-baselines3'''
         actions = action
         rewards = reward
         dones = done
 
-        # next_states = StateVecToList(next_states)
         with torch.no_grad():     
             noise_1 = torch.randn_like(actions).to(device=self.target_actor.device)
             noise_2 = torch.FloatTensor(np.array(self.noise.sigma)).to(device=self.target_actor.device)
@@ -309,9 +315,6 @@ class TD3(object):
                 self.target_actor.forward(next_states) + noise
                 ).clip(torch.FloatTensor(self.a_lb).to(device=self.target_actor.device), torch.FloatTensor(self.a_ub).to(device=self.target_actor.device))
        
-            # next_action = (
-            #     self.target_actor.forward(next_states).to(device=self.actor.device) + self.noise.get_sample().to(device=self.actor.device)
-            #     ).clip(torch.tensor(self.a_lb).to(device=self.actor.device), torch.tensor(self.a_ub).to(device=self.actor.device))
             # Compute the target Q value
             target_Q1 = self.target_critic_1.forward(next_states, next_action)
             target_Q2 = self.target_critic_2.forward(next_states, next_action)
@@ -326,12 +329,21 @@ class TD3(object):
 	# Optimize the critic 1
         self.critic_1.optimizer.zero_grad()
         critic_loss_1.backward()
+	if clip_grad:
+	    torch.nn.utils.clip_grad_value_(self.critic_1.parameters(), clip_value=self.clip)
         self.critic_1.optimizer.step()
         
         # Optimize the critic 2
         self.critic_2.optimizer.zero_grad()
         critic_loss_2.backward()
+	if clip_grad:
+	    torch.nn.utils.clip_grad_value_(self.critic_2.parameters(), clip_value=self.clip)
         self.critic_2.optimizer.step()
+	
+	# Update the clipping value
+	self.clip_evolution.append(self.clip)        
+        self.clip = max(self.clip0 - torch.sigmoid(torch.FloatTensor([self.clip_x0])).cpu().data.detach().numpy()[0]*self.clip_mul, 1.0)
+        self.clip_x0 += self.clip_inc
         
         if (timesteps % self.update_freq) == 0:
             # Update actor and target networks delayed        
@@ -463,7 +475,8 @@ class TD3(object):
                        "critic2_filename": '_' + self.critic_2.file_name,
                        "target_critic1_filename": '_' + self.target_critic_1.file_name,
                        "target_critic2_filename": '_' + self.target_critic_2.file_name,
-                       "episodes": self.episodes 
+                       "episodes": self.episodes,
+                       "clip_val": self.clip_evolution
                        }
         
         with open(self.folder+'/checkpoints/td3_train_info.json', 'w') as wf:
@@ -488,6 +501,10 @@ class TD3(object):
         self.success_rate_ts = dict_res['success_rate_ts'] 
         print('episodes ...')
         self.episodes = dict_res['episodes']
+	print('clip evolution ...')
+        self.clip_evolution = dict_res['clip_val']
+        self.clip = self.clip_evolution[-1]
+        self.clip0 = 2.
         
         print('Neural Nets ...')
         self.actor.load_checkpoint(dict_res['actor_filename'], folder=folder)
@@ -506,7 +523,8 @@ class TD3(object):
                        "mean_train_reward": [str(el) for el in self.mean_training_rewards],
                        "mean_critic_loss": [str(el) for el in self.critic_loss_evolution],
                        "success_rate": [str(el) for el in self.success_rate],
-                       "success_rate_ts": self.success_rate_ts
+                       "success_rate_ts": self.success_rate_ts,
+                       "clip_val": self.clip_evolution,
                        }
         
         date_now = time.strftime("%Y%m%d%H%M")
@@ -557,11 +575,14 @@ class DDPG(object):
         self.random_prob = random_prop
         self.validate_timesteps = 0
         self.env_id = env_id
-        # In order to force exploration use epsilon-greedy approach
-        self.epsilon = epsilon
-        self.epsion_decay = 0.999
         self.best_succ_rate = 0.0
         self.iteration = iteration + 1
+	# Parameters to perform shaped clipping value
+	self.clip0 = 2.0
+        self.clip = self.clip0
+        self.clip_mul = 2.
+        self.clip_x0 = -9.
+        self.clip_inc = 0.00002
         
         '''Panda-Gym V3'''
         self.single_env = gym.make(self.env_id, render=False)
@@ -598,6 +619,7 @@ class DDPG(object):
         self.mean_training_rewards = [] # Les recompenses mitjanes cada 100 episodis
         self.success_rate = [] # Average success rate on validaton model
         self.success_rate_ts = [] # Timestep which validation were performed
+	self.clip_evolution = [] # Gradient clipping value used in every update
         
         '''Neural Networks for Panda Gym Environments'''
         self.actor = ActorNeuralNetwork(env=self.single_env, input_dims=state_shape, n_actions=env.single_action_space.shape[-1], lr=lr, nn_dims=nn_dims, name="Actor", 
@@ -638,8 +660,11 @@ class DDPG(object):
         
         _load_from_checkpoint = load_from_checkpoint
         
-        # Omplim el buffer amb N experiències aleatòries ()
-        # if not _load_from_checkpoint:
+        if _load_from_checkpoint:
+            self.load_checkpoint(folder=self.folder)
+            max_tsteps = self.episodes
+            prev_tsteps = self.success_rate_ts[-1]
+        # Fill the buffer with N random experiences
         print("Filling replay buffer...")
         '''Panda-Gym V3'''
         state, info = self.env.reset()
@@ -653,7 +678,10 @@ class DDPG(object):
         while timesteps < self.burn_in_tsteps:
             timesteps += 1
             
-            action = self.get_action(state, random=True)
+            if _load_from_checkpoint:
+                action = self.get_action(state, random=False)
+            else:
+                action = self.get_action(state, random=True)
             
             '''Panda-Gym V3'''
             next_state, reward, terminated, truncated, info = self.env.step(action)
@@ -662,6 +690,12 @@ class DDPG(object):
             # next_state, reward, done, info = self.env.step(action)
             # any_success = np.array([i['is_success'] for i in info], dtype=bool)
             # done = done | any_success
+		
+	    # If we use OUNoise check if any environment has ended and reset the noise generation
+	    if self.noise_id == 'OUNoise':
+                for i in range(len(done)):
+                    if done[i]:
+                        self.noise.x_prev[i] = np.zeros_like(self.env.single_action_space.shape[-1])
            
             # self.buffer.append(state, action, reward, next_state, done)
             '''stable-baselines3'''
@@ -704,10 +738,11 @@ class DDPG(object):
             next_state, reward, terminated, truncated, _ = self.env.step(action)
             done = terminated | truncated
             
-            # Only update epsilon if the first environment has ended the episode
-            if done[0]:
-                # Actualitzar epsilon segons la velocitat de decaïment fixada
-                self.epsilon = max(self.epsilon * self.epsion_decay, self.random_prob)
+            # If we use OUNoise check if any environment has ended and reset the noise generation
+	    if self.noise_id == 'OUNoise':
+                for i in range(len(done)):
+                    if done[i]:
+                        self.noise.x_prev[i] = np.zeros_like(self.env.single_action_space.shape[-1])
             
             '''Validation done based on episodes completed'''
             # if any(done)==True:
@@ -726,6 +761,10 @@ class DDPG(object):
                     self.actor.save_checkpoint(folder='tmp/best_models', filename_header='DDPG_Iter_'+str(self.iteration))
                 self.success_rate.append(success_rate)
                 self.success_rate_ts.append(timesteps)
+		if load_from_checkpoint:
+                    self.success_rate_ts.append(timesteps+prev_tsteps)
+                else:
+                    self.success_rate_ts.append(timesteps)
                 print(f'\tSuccess Rate: {self.success_rate[-1]}')
             
             eps_rewards += reward
@@ -754,7 +793,7 @@ class DDPG(object):
         self.success_rate_ts.append(timesteps)
         print(f'\tSuccess Rate of Final Validation: {self.success_rate[-1]}')
                                 
-    def update_networks(self, timesteps, batch=None):
+    def update_networks(self, timesteps, batch=None, clip_grad=False):
         # state, action, reward, next_state, done = self.buffer.sample_batch(batch_size=self.batch_size)
         '''stable-baselines3'''
         samples = self.buffer.sample(batch_size=self.batch_size, env=self.env)
@@ -764,19 +803,13 @@ class DDPG(object):
         done = samples[3]      
         reward = samples[4]
         
-        # Separem les variables de l'experiència i les convertim a tensors
         if (isinstance(self.env.observation_space, gym.spaces.Dict)):
-            # states = state
-            # next_states = next_state
             states = StateVecToList(state)
             next_states = StateVecToList(next_state)
         else:
             states = np.array(state) #torch.tensor(np.array(state), dtype=torch.float).to(self.actor.device)
             next_states = np.array(next_state) #torch.tensor(np.array(next_state), dtype=torch.float).to(self.actor.device)
             
-        # actions = torch.tensor(np.array(action), dtype=torch.float).to(self.actor.device)
-        # rewards = torch.tensor(reward, dtype=torch.float).to(self.actor.device)
-        # dones = torch.tensor(done, dtype=torch.float).to(self.actor.device)
         '''stable-baselines3'''
         actions = action
         rewards = reward
@@ -794,10 +827,17 @@ class DDPG(object):
         # Compute critic loss
         critic_loss = F.mse_loss(current_Q, target_Q)
         
-		# Optimize the critic
+	# Optimize the critic
         self.critic.optimizer.zero_grad()
         critic_loss.backward()
+	if clip_grad:
+	    torch.nn.utils.clip_grad_value_(self.critic.parameters(), clip_value=self.clip)
         self.critic.optimizer.step()
+	
+	# Update the clipping value
+	self.clip_evolution.append(self.clip)        
+        self.clip = max(self.clip0 - torch.sigmoid(torch.FloatTensor([self.clip_x0])).cpu().data.detach().numpy()[0]*self.clip_mul, 1.0)
+        self.clip_x0 += self.clip_inc
         
         if (timesteps % self.update_freq) == 0:
             # Update actor and target networks delayed        
@@ -910,7 +950,8 @@ class DDPG(object):
                        "target_actor_filename": '_' + self.target_actor.file_name,
                        "critic_filename": '_' + self.critic.file_name,
                        "target_critic_filename": '_' + self.target_critic.file_name,
-                       "episodes": self.episodes 
+                       "episodes": self.episodes,
+                       "clip_val": self.clip_evolution,
                        }
         
         with open(self.folder+'/checkpoints/ddpg_train_info.json', 'w') as wf:
@@ -935,6 +976,10 @@ class DDPG(object):
         self.success_rate_ts = dict_res['success_rate_ts'] 
         print('episodes ...')
         self.episodes = dict_res['episodes']
+	print('clip evolution ...')
+        self.clip_evolution = dict_res['clip_val']
+        self.clip = self.clip_evolution[-1]
+        self.clip0 = 2.
         
         print('Neural Nets ...')
         self.actor.load_checkpoint(dict_res['actor_filename'], folder=folder)
@@ -951,7 +996,8 @@ class DDPG(object):
                        "mean_train_reward": [str(el) for el in self.mean_training_rewards],
                        "mean_critic_loss": [str(el) for el in self.critic_loss_evolution],
                        "success_rate": [str(el) for el in self.success_rate],
-                       "success_rate_ts": self.success_rate_ts
+                       "success_rate_ts": self.success_rate_ts,
+                       "clip_val": self.clip_evolution
                        }
         
         date_now = time.strftime("%Y%m%d%H%M")
@@ -984,39 +1030,62 @@ if __name__ == '__main__':
     agent_type = "DDPG" # TD3
     
     s_folder = 'tmp'
-    lr = 1e-3
+    a_lr, c_lr = 1e-3, 1e-3
     nn_dims = [256, 256, 256]    
     mem_size = int(1e6) 
     burn_in_tsteps = int(1e5)
     
-    for i in range(10):
-        if i<5:
-            agent_type = "DDPG"
-        else:
-            agent_type = "TD3"
-        
-        if buffer_type == "HER":
-            # buffer = HERBuffer(envs, memory_size=mem_size, env_id=env_id, n_sampled_goal=4)
-            '''stable-baselines3'''
-            buffer = HerReplayBuffer(buffer_size=mem_size, observation_space=envs.single_observation_space, action_space=envs.single_action_space,
-                                     env=envs, device=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'), n_envs=n_envs,
-                                     optimize_memory_usage=False, handle_timeout_termination=False, n_sampled_goal=4, goal_selection_strategy="future",
-                                     online_sampling=True, env_id=env_id)            
-#         else:
-#             buffer = experienceReplayBuffer(envs, memory_size=mem_size, burn_in=burn_in_tsteps) # buffer de repeticions
-                 
-        if agent_type.upper() == "DDPG":
-            agent = DDPG(envs, buffer, noise="Normal", theta=0.15, sigma=0.2, dt=0.1, folder=s_folder, gamma=0.99,
-                                burn_in_tsteps=burn_in_tsteps, batch_size=256, lr=lr, polyak=0.95, upd_freq=1, random_prop=0.3, nn_dims=nn_dims,
-                                env_id=env_id, n_envs=n_envs, iteration=i+2, epsilon=0.3, bias=True)
-        elif agent_type.upper() == "TD3":
-            agent = TD3(envs, buffer, noise="Normal", theta=0.15, sigma=0.2, dt=0.1, folder=s_folder, gamma=0.99,
-                                burn_in_tsteps=burn_in_tsteps, batch_size=256, lr=lr, polyak=0.95, upd_freq=2, random_prop=0.3, nn_dims=nn_dims,
-                                env_id=env_id, n_envs=n_envs, iteration=abs(i-3), epsilon=0.3, bias=True)
+    random.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
+    buffer = HerReplayBuffer(buffer_size=mem_size, observation_space=envs.single_observation_space, action_space=envs.single_action_space,
+                                env=envs, device=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'), n_envs=n_envs,
+                                optimize_memory_usage=False, handle_timeout_termination=False, n_sampled_goal=4, goal_selection_strategy="future",
+                                online_sampling=True, env_id=env_id)                 
+    ddpg_agent_oun = DDPG_RandProp(envs, buffer, noise="OUNoise", theta=0.15, sigma=0.2, dt=0.1, folder=s_folder, gamma=0.98, mem_size=mem_size,
+                        burn_in_tsteps=burn_in_tsteps, batch_size=256, a_lr=a_lr, c_lr=c_lr, polyak=0.95, upd_freq=1, random_prop=0.3, nn_dims=nn_dims,
+                        env_id=env_id, n_envs=n_envs, iteration=2, epsilon=0.3, bias=True)
+    ddpg_agent_oun.train(max_tsteps=int(1.4e6), update_steps=1, tsteps_checkpoint=10000, load_from_checkpoint=False, validate_timesteps=1000, validate_eps=80)
+    ddpg_agent_oun.save_results(folder=s_folder)
     
-        agent.train(max_tsteps=int(1.15e6), update_steps=1, tsteps_checkpoint=20000, load_from_checkpoint=False, validate_timesteps=1000, validate_eps=80)
-        agent.save_models()
-        agent.save_results(folder=s_folder)
+    random.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
+    buffer = HerReplayBuffer(buffer_size=mem_size, observation_space=envs.single_observation_space, action_space=envs.single_action_space,
+                                env=envs, device=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'), n_envs=n_envs,
+                                optimize_memory_usage=False, handle_timeout_termination=False, n_sampled_goal=4, goal_selection_strategy="future",
+                                online_sampling=True, env_id=env_id)                 
+    ddpg_agent_nn = DDPG_RandProp(envs, buffer, noise="Normal", theta=0.15, sigma=0.2, dt=0.1, folder=s_folder, gamma=0.98, mem_size=mem_size,
+                        burn_in_tsteps=burn_in_tsteps, batch_size=256, a_lr=a_lr, c_lr=c_lr, polyak=0.95, upd_freq=1, random_prop=0.3, nn_dims=nn_dims,
+                        env_id=env_id, n_envs=n_envs, iteration=1, epsilon=0.3, bias=True)
+    ddpg_agent_nn.train(max_tsteps=int(1.4e6), update_steps=1, tsteps_checkpoint=10000, load_from_checkpoint=False, validate_timesteps=1000, validate_eps=80)
+    ddpg_agent_nn.save_results(folder=s_folder)
+    
+    random.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
+    buffer = HerReplayBuffer(buffer_size=mem_size, observation_space=envs.single_observation_space, action_space=envs.single_action_space,
+                                env=envs, device=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'), n_envs=n_envs,
+                                optimize_memory_usage=False, handle_timeout_termination=False, n_sampled_goal=4, goal_selection_strategy="future",
+                                online_sampling=True, env_id=env_id)                 
+    TD3_agent_oun = TD3_RandProp(envs, buffer, noise="OUNoise", theta=0.15, sigma=0.2, dt=0.1, folder=s_folder, gamma=0.98, mem_size=mem_size,
+                        burn_in_tsteps=burn_in_tsteps, batch_size=256, a_lr=a_lr, c_lr=c_lr, polyak=0.95, upd_freq=2, random_prop=0.3, nn_dims=nn_dims,
+                        env_id=env_id, n_envs=n_envs, iteration=2, epsilon=0.3, bias=True)
+    TD3_agent_oun.train(max_tsteps=int(2.e6), update_steps=1, tsteps_checkpoint=10000, load_from_checkpoint=False, validate_timesteps=1000, validate_eps=80)
+    TD3_agent_oun.save_results(folder=s_folder)
+    
+    random.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
+    buffer = HerReplayBuffer(buffer_size=mem_size, observation_space=envs.single_observation_space, action_space=envs.single_action_space,
+                                env=envs, device=torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'), n_envs=n_envs,
+                                optimize_memory_usage=False, handle_timeout_termination=False, n_sampled_goal=4, goal_selection_strategy="future",
+                                online_sampling=True, env_id=env_id)   
+    TD3_agent_nn = TD3_RandProp(envs, buffer, noise="Normal", theta=0.15, sigma=0.2, dt=0.1, folder=s_folder, gamma=0.98, mem_size=mem_size,
+                        burn_in_tsteps=burn_in_tsteps, batch_size=256, a_lr=a_lr, c_lr=c_lr, polyak=0.95, upd_freq=2, random_prop=0.3, nn_dims=nn_dims,
+                        env_id=env_id, n_envs=n_envs, iteration=1, epsilon=0.3, bias=True)
+    TD3_agent_nn.train(max_tsteps=int(2.e6), update_steps=3, tsteps_checkpoint=10000, load_from_checkpoint=True, validate_timesteps=1000, validate_eps=80)
+    TD3_agent_nn.save_results(folder=s_folder)
+
 
     envs.close()
-
