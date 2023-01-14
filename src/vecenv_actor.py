@@ -65,15 +65,10 @@ class ActorNeuralNetwork(nn.Module):
         return (-lim, lim)
 
     def reset_parameters(self):
-        # DEFAULT: Wl1=(-0.0625, 0.0625); Wl2=(-0.0625, 0.0625); Wl3=(-0.0625, 0.0625); Wq=(-3e3, 3e3)
-        nn.init.uniform_(self.layer1.weight.data, -0.07, 0.07)
-        nn.init.uniform_(self.layer1.bias.data, -0.65, 0.65)
-        nn.init.uniform_(self.layer2.weight.data, -0.07, 0.07)
-        nn.init.uniform_(self.layer2.bias.data, -0.65, 0.65)
-        nn.init.uniform_(self.layer3.weight.data, -0.07, 0.07)
-        nn.init.uniform_(self.layer3.bias.data, -0.65, 0.65)
-        nn.init.uniform_(self.action.weight.data, -0.003, 0.003)
-        nn.init.uniform_(self.action.bias.data, -0.004, 0.004)
+        nn.init.kaiming_uniform_(self.layer1.weight.data, mode='fan_in', nonlinearity='relu')
+        nn.init.kaiming_uniform_(self.layer2.weight.data, mode='fan_in', nonlinearity='relu')
+        nn.init.kaiming_uniform_(self.layer3.weight.data, mode='fan_in', nonlinearity='relu')
+        nn.init.kaiming_uniform_(self.action.weight.data, mode='fan_in', nonlinearity='relu')
      
     def forward(self, state) -> torch.Tensor:
         if (isinstance(state, Union[Dict, OrderedDict, gym.spaces.Dict])):
